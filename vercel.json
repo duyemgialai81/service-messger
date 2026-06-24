@@ -13,7 +13,7 @@
   "rewrites": [
     {
       "source": "/backend/:path*",
-      "destination": "https://duyem.duckdns.org/backend/:path*"
+      "destination": "https://duyem.duckdns.org/:path*"
     },
     { "source": "/(.*)", "destination": "/" }
   ]
