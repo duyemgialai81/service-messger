@@ -1,0 +1,20 @@
+{
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin-allow-popups"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/backend/:path*",
+      "destination": "https://duyem.duckdns.org/:path*"
+    },
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}

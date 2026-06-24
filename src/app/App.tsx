@@ -325,6 +325,7 @@ function AppShell() {
 
 export default function App() {
   return (
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
     <AuthProvider>
       <AppShell />
       <Toaster
@@ -342,5 +343,6 @@ export default function App() {
         }}
       />
     </AuthProvider>
+    </GoogleOAuthProvider>
   );
 }
