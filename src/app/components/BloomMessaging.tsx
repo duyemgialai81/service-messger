@@ -6,10 +6,12 @@ import {
   Loader2, MessageCircle, Mic, MicOff, MoreHorizontal, Phone, PhoneOff, Search, Send,
   ScreenShare, ScreenShareOff, ShieldAlert, Smile, Sparkles, SwitchCamera, ThumbsUp,
   Reply, Trash2, Pencil, User as UserIcon, Video, VideoOff, Volume2, X, Plus, Bell, Users, Wifi,
+  LogOut, Sun, Moon, Snowflake, Flower2,
 } from "lucide-react";
 import { toast } from "sonner";
 import api, { normalizeAssetUrl, normalizeAvatarUrl } from "../../lib/api";
 import { localStorage_service } from "../../lib/localStorage";
+import { useAuth } from "../../lib/authContext";
 import { clearPendingCall, createRealtimeConnection, INCOMING_CALL_EVENT, readPendingCall } from "../../lib/realtime";
 import { formatVietnamTime } from "../../lib/time";
 
@@ -98,7 +100,7 @@ async function loadImageSrc(src: string) {
   if (!shouldCacheImage(n)) return n;
   const c = imageMemoryCache.get(n); if (c) return c;
   const f = imageInflightCache.get(n); if (f) return f;
-  const p = fetch(n, { cache: "force-cache", credentials: "omit" })
+  const p = fetch(n, { cache: "force-cache", credentials: "include", mode: "cors" })
     .then((r) => { if (!r.ok) throw new Error(""); return r.blob(); })
     .then((b) => { const u = URL.createObjectURL(b); imageMemoryCache.set(n, u); trimImageCache(); return u; })
     .catch(() => n).finally(() => { imageInflightCache.delete(n); });
@@ -145,6 +147,147 @@ function formatMessageDateLabel(v?: string) {
 function isAudioAttachment(msg: Pick<MessageItem, "attachmentName" | "attachmentUrl">) {
   return /\.(webm|mp3|wav|m4a|aac|ogg)(?:$|[?#\s])/i.test(`${msg.attachmentName || ""} ${msg.attachmentUrl || ""}`.toLowerCase());
 }
+function isImageUrl(url?: string) {
+  if (!url) return false;
+  return /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)(?:$|[?#\s])/i.test(url);
+}
+
+// ============================================================
+// CANVAS 0 — Hiệu ứng rơi: Tuyết & Hoa Anh Đào
+// ============================================================
+type FallingMode = "none" | "snow" | "sakura";
+const FallingEffectsCanvas = memo(function FallingEffectsCanvas({ mode }: { mode: FallingMode }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef = useRef(0);
+
+  useEffect(() => {
+    if (mode === "none") return;
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    let w = 0, h = 0;
+
+    interface Flake { x: number; y: number; r: number; vx: number; vy: number; wobbleA: number; wobbleS: number; phase: number; opacity: number; rot: number; rotS: number; }
+    const flakes: Flake[] = [];
+
+    const init = () => {
+      flakes.length = 0;
+      const count = Math.min(Math.floor((w * h) / 6000), 120);
+      for (let i = 0; i < count; i++) {
+        flakes.push(makeFlake(true));
+      }
+    };
+
+    const makeFlake = (randomY: boolean) => {
+      if (mode === "snow") {
+        return {
+          x: Math.random() * w, y: randomY ? Math.random() * h : -10,
+          r: 1.5 + Math.random() * 3.5, vx: (Math.random() - 0.5) * 0.3,
+          vy: 0.5 + Math.random() * 1.5,
+          wobbleA: 0.5 + Math.random() * 1, wobbleS: 0.01 + Math.random() * 0.02,
+          phase: Math.random() * Math.PI * 2, opacity: 0.4 + Math.random() * 0.5,
+          rot: 0, rotS: (Math.random() - 0.5) * 0.02,
+        };
+      } else {
+        return {
+          x: Math.random() * w, y: randomY ? Math.random() * h : -20,
+          r: 3 + Math.random() * 5, vx: (Math.random() - 0.5) * 0.5,
+          vy: 0.4 + Math.random() * 1.2,
+          wobbleA: 1 + Math.random() * 1.5, wobbleS: 0.008 + Math.random() * 0.015,
+          phase: Math.random() * Math.PI * 2, opacity: 0.35 + Math.random() * 0.45,
+          rot: Math.random() * Math.PI * 2, rotS: (Math.random() - 0.5) * 0.04,
+        };
+      }
+    };
+
+    const resize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = window.innerWidth; h = window.innerHeight;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      init();
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    let t = 0;
+    const draw = () => {
+      t++;
+      ctx.clearRect(0, 0, w, h);
+
+      for (const f of flakes) {
+        f.phase += f.wobbleS;
+        f.x += f.vx + Math.sin(f.phase) * f.wobbleA * 0.3;
+        f.y += f.vy;
+        f.rot += f.rotS;
+
+        if (f.y > h + 20) { Object.assign(f, makeFlake(false)); }
+        if (f.x < -20) f.x = w + 20;
+        if (f.x > w + 20) f.x = -20;
+
+        if (mode === "snow") {
+          // Snowflake: soft glowing circle
+          const gr = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, Math.max(0.5, f.r * 2));
+          gr.addColorStop(0, `rgba(220, 240, 255, ${f.opacity})`);
+          gr.addColorStop(0.4, `rgba(200, 225, 250, ${f.opacity * 0.4})`);
+          gr.addColorStop(1, `rgba(180, 210, 240, 0)`);
+          ctx.fillStyle = gr;
+          ctx.beginPath();
+          ctx.arc(f.x, f.y, Math.max(0.5, f.r * 2), 0, Math.PI * 2);
+          ctx.fill();
+          // Core
+          ctx.fillStyle = `rgba(255, 255, 255, ${f.opacity * 0.9})`;
+          ctx.beginPath();
+          ctx.arc(f.x, f.y, Math.max(0.3, f.r * 0.4), 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Sakura petal: draw with rotation
+          ctx.save();
+          ctx.translate(f.x, f.y);
+          ctx.rotate(f.rot);
+          ctx.globalAlpha = f.opacity;
+          ctx.fillStyle = `hsla(${340 + Math.sin(f.phase) * 10}, 75%, 80%, 1)`;
+          ctx.beginPath();
+          // Petal shape
+          const s = f.r;
+          ctx.moveTo(0, 0);
+          ctx.bezierCurveTo(s * 0.8, -s * 0.6, s * 1.2, -s * 0.2, s * 1.2, 0);
+          ctx.bezierCurveTo(s * 1.2, s * 0.2, s * 0.8, s * 0.6, 0, 0);
+          ctx.fill();
+          // Second petal rotated
+          ctx.rotate(Math.PI * 0.6);
+          ctx.fillStyle = `hsla(${345 + Math.sin(f.phase + 1) * 10}, 70%, 85%, 0.7)`;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.bezierCurveTo(s * 0.7, -s * 0.5, s * 1.0, -s * 0.15, s * 1.0, 0);
+          ctx.bezierCurveTo(s * 1.0, s * 0.15, s * 0.7, s * 0.5, 0, 0);
+          ctx.fill();
+          ctx.restore();
+          // Soft glow
+          const gg = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, Math.max(1, f.r * 1.8));
+          gg.addColorStop(0, `hsla(345, 65%, 85%, ${f.opacity * 0.12})`);
+          gg.addColorStop(1, `hsla(345, 65%, 85%, 0)`);
+          ctx.fillStyle = gg;
+          ctx.beginPath();
+          ctx.arc(f.x, f.y, Math.max(1, f.r * 1.8), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      rafRef.current = requestAnimationFrame(draw);
+    };
+    rafRef.current = requestAnimationFrame(draw);
+
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      window.removeEventListener("resize", resize);
+    };
+  }, [mode]);
+
+  if (mode === "none") return null;
+  return <canvas ref={canvasRef} style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none" }} />;
+});
+
 // ============================================================
 // CANVAS 1 — Nền toàn màn hình: Particle Network + Aurora + Shooting Stars
 // ============================================================
@@ -213,21 +356,33 @@ const ParticleNetworkBackground = memo(function ParticleNetworkBackground() {
       const mx = mouseRef.current.x; const my = mouseRef.current.y;
       const mActive = mouseRef.current.active;
       t += 1;
-      ctx.clearRect(0, 0, w, h);
 
-      // --- Cyber grid (moving) ---
-      gridOffset = (gridOffset + 0.25) % 80;
-      ctx.strokeStyle = "rgba(8, 145, 178, 0.045)";
-      ctx.lineWidth = 1;
-      const gridSpacing = 80;
-      for (let y = h; y > 0; y -= gridSpacing) {
-        ctx.beginPath(); ctx.moveTo(0, y + gridOffset); ctx.lineTo(w, y + gridOffset); ctx.stroke();
-      }
-      for (let x = 0; x < w; x += gridSpacing) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-      }
+      // --- VFX Max: Trail effect (semi-transparent clear) ---
+      const isDark = document.documentElement.classList.contains("bloom-dark");
+      ctx.fillStyle = isDark ? "rgba(10, 18, 32, 0.13)" : "rgba(249, 253, 255, 0.13)";
+      ctx.fillRect(0, 0, w, h);
 
-      // --- Auroras ---
+      // --- Cyber grid (scrolling 2D) ---
+      gridOffset = (gridOffset + 0.35) % 60;
+      ctx.strokeStyle = "rgba(8, 145, 178, 0.035)";
+      ctx.lineWidth = 0.5;
+      const gridSpacing = 60;
+      for (let y = h + 60; y > -60; y -= gridSpacing) {
+        const gy = y + gridOffset;
+        if (gy < -60 || gy > h + 60) continue;
+        ctx.globalAlpha = Math.max(0, 1 - Math.abs(gy - h * 0.5) / (h * 0.7)) * 0.55;
+        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
+      }
+      for (let x = -60; x < w + 60; x += gridSpacing) {
+        const gx = x + gridOffset * 0.7;
+        ctx.globalAlpha = Math.max(0, 1 - Math.abs(gx - w * 0.5) / (w * 0.7)) * 0.55;
+        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      // --- Auroras (ADDITIVE BLENDING) ---
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
       for (const a of aurorasRef.current) {
         a.phase += a.speed; a.hue += a.hueSpeed * 0.01;
         a.x += a.vx + Math.sin(a.phase) * 0.45;
@@ -239,22 +394,25 @@ const ParticleNetworkBackground = memo(function ParticleNetworkBackground() {
         const pr = Math.max(1, a.radius + Math.sin(a.phase * 1.2) * 40);
         const hs = Math.sin(a.phase * 0.4) * 20;
         const g = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, pr);
-        g.addColorStop(0, `hsla(${a.hue + hs}, 65%, 52%, 0.07)`);
-        g.addColorStop(0.35, `hsla(${a.hue + hs + 8}, 55%, 48%, 0.035)`);
-        g.addColorStop(0.7, `hsla(${a.hue + hs + 15}, 45%, 45%, 0.012)`);
+        g.addColorStop(0, `hsla(${a.hue + hs}, 72%, 55%, 0.06)`);
+        g.addColorStop(0.3, `hsla(${a.hue + hs + 8}, 62%, 50%, 0.03)`);
+        g.addColorStop(0.65, `hsla(${a.hue + hs + 15}, 50%, 45%, 0.01)`);
         g.addColorStop(1, `hsla(${a.hue + hs}, 40%, 40%, 0)`);
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(a.x, a.y, pr, 0, Math.PI * 2); ctx.fill();
       }
+      ctx.restore();
 
-      // --- Shooting stars ---
-      if (Math.random() < 0.004) {
-        const angle = Math.PI * 0.15 + Math.random() * Math.PI * 0.2;
-        const speed = 4 + Math.random() * 5;
+      // --- Shooting stars (ADDITIVE BLENDING + nebula trail) ---
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      if (Math.random() < 0.005) {
+        const angle = Math.PI * 0.12 + Math.random() * Math.PI * 0.25;
+        const speed = 5 + Math.random() * 6;
         shootingStarsRef.current.push({
-          x: Math.random() * w * 0.8, y: Math.random() * h * 0.3,
+          x: Math.random() * w * 0.85, y: Math.random() * h * 0.25,
           vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
-          life: 0, maxLife: 40 + Math.random() * 30,
-          hue: 165 + Math.random() * 30, length: 40 + Math.random() * 60, width: 1 + Math.random() * 1.5,
+          life: 0, maxLife: 45 + Math.random() * 35,
+          hue: 162 + Math.random() * 35, length: 55 + Math.random() * 75, width: 1.2 + Math.random() * 1.8,
         });
       }
       for (let i = shootingStarsRef.current.length - 1; i >= 0; i--) {
@@ -262,23 +420,32 @@ const ParticleNetworkBackground = memo(function ParticleNetworkBackground() {
         s.x += s.vx; s.y += s.vy; s.life++;
         if (s.life >= s.maxLife) { shootingStarsRef.current.splice(i, 1); continue; }
         const progress = s.life / s.maxLife;
-        const alpha = progress < 0.2 ? progress / 0.2 : 1 - (progress - 0.2) / 0.8;
-        const tailX = s.x - (s.vx / Math.sqrt(s.vx * s.vx + s.vy * s.vy)) * s.length;
-        const tailY = s.y - (s.vy / Math.sqrt(s.vx * s.vx + s.vy * s.vy)) * s.length;
+        const alpha = progress < 0.15 ? progress / 0.15 : 1 - (progress - 0.15) / 0.85;
+        const speed2 = Math.sqrt(s.vx * s.vx + s.vy * s.vy);
+        const tailX = s.x - (s.vx / speed2) * s.length;
+        const tailY = s.y - (s.vy / speed2) * s.length;
         const grad = ctx.createLinearGradient(tailX, tailY, s.x, s.y);
-        grad.addColorStop(0, `hsla(${s.hue}, 80%, 70%, 0)`);
-        grad.addColorStop(0.7, `hsla(${s.hue}, 80%, 75%, ${alpha * 0.4})`);
-        grad.addColorStop(1, `hsla(${s.hue}, 90%, 85%, ${alpha * 0.9})`);
+        grad.addColorStop(0, `hsla(${s.hue}, 85%, 70%, 0)`);
+        grad.addColorStop(0.5, `hsla(${s.hue}, 85%, 78%, ${alpha * 0.3})`);
+        grad.addColorStop(0.85, `hsla(${s.hue}, 92%, 88%, ${alpha * 0.7})`);
+        grad.addColorStop(1, `hsla(${s.hue}, 95%, 95%, ${alpha})`);
         ctx.strokeStyle = grad; ctx.lineWidth = s.width; ctx.lineCap = "round";
         ctx.beginPath(); ctx.moveTo(tailX, tailY); ctx.lineTo(s.x, s.y); ctx.stroke();
-        // Head glow
-        const hg = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, 6);
-        hg.addColorStop(0, `hsla(${s.hue}, 90%, 90%, ${alpha * 0.7})`);
-        hg.addColorStop(1, `hsla(${s.hue}, 90%, 90%, 0)`);
-        ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(s.x, s.y, 6, 0, Math.PI * 2); ctx.fill();
+        // Wider nebula trail
+        ctx.lineWidth = s.width * 4;
+        ctx.globalAlpha = alpha * 0.12;
+        ctx.beginPath(); ctx.moveTo(tailX, tailY); ctx.lineTo(s.x, s.y); ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Head glow (bigger)
+        const hg = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, 10);
+        hg.addColorStop(0, `hsla(${s.hue}, 95%, 95%, ${alpha * 0.6})`);
+        hg.addColorStop(0.4, `hsla(${s.hue}, 90%, 85%, ${alpha * 0.2})`);
+        hg.addColorStop(1, `hsla(${s.hue}, 85%, 80%, 0)`);
+        ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(s.x, s.y, 10, 0, Math.PI * 2); ctx.fill();
       }
+      ctx.restore();
 
-      // --- Particles ---
+      // --- Particles (VFX: enhanced mouse attraction + additive glow) ---
       const pts = particlesRef.current;
       for (const p of pts) {
         p.pulse += p.pulseSpeed;
@@ -286,23 +453,29 @@ const ParticleNetworkBackground = memo(function ParticleNetworkBackground() {
           const dx = mx - p.x; const dy = my - p.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < MOUSE_R && dist > 1) {
-            const force = (MOUSE_R - dist) / MOUSE_R * 0.012;
-            p.vx += (dx / dist) * force; p.vy += (dy / dist) * force;
+            const force = (MOUSE_R - dist) / MOUSE_R;
+            const attract = force * force * 0.025;
+            p.vx += (dx / dist) * attract; p.vy += (dy / dist) * attract;
           }
         }
-        p.vx *= 0.997; p.vy *= 0.997;
+        p.vx *= 0.995; p.vy *= 0.995;
         p.x += p.vx; p.y += p.vy;
         if (p.x < -15) p.x = w + 15; if (p.x > w + 15) p.x = -15;
         if (p.y < -15) p.y = h + 15; if (p.y > h + 15) p.y = -15;
         const pAlpha = p.opacity * (0.7 + Math.sin(p.pulse) * 0.3);
-        const glowR = Math.max(0.1, p.r * 4);
+        // Particle glow with additive
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        const glowR = Math.max(0.1, p.r * 5);
         const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowR);
-        glow.addColorStop(0, `hsla(${p.hue}, 85%, 68%, ${pAlpha})`);
-        glow.addColorStop(0.4, `hsla(${p.hue}, 75%, 58%, ${pAlpha * 0.25})`);
+        glow.addColorStop(0, `hsla(${p.hue}, 88%, 70%, ${pAlpha * 0.8})`);
+        glow.addColorStop(0.35, `hsla(${p.hue}, 78%, 60%, ${pAlpha * 0.2})`);
         glow.addColorStop(1, `hsla(${p.hue}, 65%, 50%, 0)`);
         ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(p.x, p.y, glowR, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = `hsla(${p.hue}, 95%, 85%, ${pAlpha * 0.85})`;
-        ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0.1, p.r * 0.5), 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        // Bright core
+        ctx.fillStyle = `hsla(${p.hue}, 95%, 88%, ${pAlpha * 0.9})`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0.1, p.r * 0.55), 0, Math.PI * 2); ctx.fill();
       }
 
       // --- Connection lines ---
@@ -997,7 +1170,14 @@ const SendRippleCanvas = memo(function SendRippleCanvas({ trigger }: { trigger: 
 });
 // ==================== COMPONENT ====================
 export default function BloomMessaging({ currentUser }: MessagesPageProps) {
+  const { logout: authLogout } = useAuth();
   const [chatFilter, setChatFilter] = useState<"all" | "unread" | "pending">("all");
+  const [darkMode, setDarkMode] = useState(() => {
+    try { return localStorage.getItem("bloom-dark-mode") === "true"; } catch { return false; }
+  });
+  const [fallingMode, setFallingMode] = useState<FallingMode>(() => {
+    try { return (localStorage.getItem("bloom-falling-mode") as FallingMode) || "none"; } catch { return "none"; }
+  });
   const [userSearchQuery, setUserSearchQuery] = useState("");
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [searchResults, setSearchResults] = useState<SearchUserItem[]>([]);
@@ -1081,6 +1261,24 @@ const [emojiBurstEmoji, setEmojiBurstEmoji] = useState("👍");
 const [sendRippleTrigger, setSendRippleTrigger] = useState(0);
   const toId = (v: unknown) => (v == null ? "" : String(v));
   const currentUserId = toId(currentUser?.id);
+
+  // Persist dark mode & falling mode
+  useEffect(() => {
+    try { localStorage.setItem("bloom-dark-mode", String(darkMode)); } catch {}
+    document.documentElement.classList.toggle("bloom-dark", darkMode);
+  }, [darkMode]);
+  useEffect(() => {
+    try { localStorage.setItem("bloom-falling-mode", fallingMode); } catch {}
+  }, [fallingMode]);
+
+  const toggleDarkMode = useCallback(() => setDarkMode(d => !d), []);
+  const cycleFallingMode = useCallback(() => {
+    setFallingMode(m => m === "none" ? "snow" : m === "snow" ? "sakura" : "none");
+  }, []);
+  const handleLogout = useCallback(() => {
+    authLogout();
+    toast.success("Đã đăng xuất");
+  }, [authLogout]);
 
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
   useEffect(() => { callSessionRef.current = callSession; }, [callSession]);
@@ -2045,6 +2243,7 @@ const [sendRippleTrigger, setSendRippleTrigger] = useState(0);
       {/* ── BACKGROUND ── */}
       <div className="bloom-bg-fixed" />
       <ParticleNetworkBackground />
+<FallingEffectsCanvas mode={fallingMode} />
 <ConfettiBurstCanvas trigger={confettiTrigger} />
 <EmojiBurstCanvas emoji={emojiBurstEmoji} trigger={emojiBurstTrigger} />
 
@@ -2164,6 +2363,24 @@ const [sendRippleTrigger, setSendRippleTrigger] = useState(0);
             })
           )}
         </div>
+
+        {/* ── iOS-STYLE BOTTOM DOCK ── */}
+        <div className="bloom-dock">
+          <button type="button" className="bloom-dock-item" onClick={toggleDarkMode}>
+            <div className="bloom-dock-icon-wrap">{darkMode ? <Sun size={20} /> : <Moon size={20} />}</div>
+            <span className="bloom-dock-label">{darkMode ? "Sáng" : "Tối"}</span>
+          </button>
+          <button type="button" className={`bloom-dock-item${fallingMode !== "none" ? " active" : ""}`} onClick={cycleFallingMode}>
+            <div className="bloom-dock-icon-wrap">
+              {fallingMode === "none" ? <Snowflake size={20} /> : fallingMode === "snow" ? <Flower2 size={20} /> : <X size={20} />}
+            </div>
+            <span className="bloom-dock-label">{fallingMode === "none" ? "Hiệu ứng" : fallingMode === "snow" ? "Tuyết" : "Hoa"}</span>
+          </button>
+          <button type="button" className="bloom-dock-item" onClick={handleLogout}>
+            <div className="bloom-dock-icon-wrap"><LogOut size={20} /></div>
+            <span className="bloom-dock-label">Thoát</span>
+          </button>
+        </div>
       </div>
 
       {/* ── MAIN CHAT ── */}
@@ -2237,7 +2454,10 @@ const [sendRippleTrigger, setSendRippleTrigger] = useState(0);
                       const prevSame = idx > 0 && messages[idx - 1]?.senderId === msg.senderId;
                       const isTemp = msg.id.startsWith("temp_");
                       const attachIsAudio = Boolean(msg.attachmentUrl && isAudioAttachment(msg));
+                      const effectiveMsgType = String(msg.messageType || "").toLowerCase();
+                      const attachIsImage = Boolean(msg.attachmentUrl && (effectiveMsgType === "image" || isImageUrl(msg.attachmentUrl)));
                       const isGenCaption = Boolean(msg.attachmentUrl && (msg.text === "Đã gửi một hình ảnh" || msg.text === "Đã gửi một tin nhắn thoại" || msg.text.startsWith("Đã gửi tệp:")));
+                      const showInlineImage = attachIsImage && !msg.isDeleted;
                       const visibleReactions = Object.entries(msg.reactions || {}).filter(([, count]) => count > 0);
                       const totalReactions = visibleReactions.reduce((t, [, c]) => t + c, 0);
                       const hasMyReaction = Object.values(msg.userReactions || {}).some(Boolean);
@@ -2288,8 +2508,8 @@ const [sendRippleTrigger, setSendRippleTrigger] = useState(0);
                                 onDoubleClick={() => { if (!msg.isDeleted && !isTemp) handleToggleReaction(msg.id, "❤️"); }}
                               >
                                 {msg.attachmentUrl && !msg.isDeleted && (
-                                  String(msg.messageType).toLowerCase() === "image"
-                                    ? <CachedImage className="bloom-img-attachment" src={normalizeAssetUrl(msg.attachmentUrl) || msg.attachmentUrl} alt={msg.attachmentName || ""} />
+                                  showInlineImage
+                                    ? <CachedImage className="bloom-img-attachment" src={normalizeAssetUrl(msg.attachmentUrl) || msg.attachmentUrl} alt={msg.attachmentName || ""} onClick={() => { const imgurl = normalizeAssetUrl(msg.attachmentUrl) || msg.attachmentUrl; if (imgurl) window.open(imgurl, '_blank'); }} />
                                     : attachIsAudio
                                       ? <div className="bloom-audio-attachment"><Mic size={14} /><audio controls preload="metadata" src={normalizeAssetUrl(msg.attachmentUrl) || msg.attachmentUrl} /></div>
                                       : <a className="bloom-file-attachment" href={normalizeAssetUrl(msg.attachmentUrl) || msg.attachmentUrl} target="_blank" rel="noreferrer"><FileText size={16} /><span>{msg.attachmentName || "Tệp đính kèm"}</span></a>
@@ -2761,6 +2981,72 @@ const [sendRippleTrigger, setSendRippleTrigger] = useState(0);
         .bloom-conv-list::-webkit-scrollbar-track { background: transparent; }
         .bloom-conv-list::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, 0.1); border-radius: 2px; }
 
+        /* iOS-STYLE BOTTOM DOCK */
+        .bloom-dock {
+          flex-shrink: 0;
+          display: flex;
+          justify-content: center;
+          gap: 4px;
+          padding: 8px 12px 12px;
+          background: linear-gradient(180deg, transparent 0%, rgba(255,255,255,0.08) 60%);
+          border-top: 1px solid rgba(15, 23, 42, 0.06);
+        }
+        .bloom-dock-item {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 3px;
+          padding: 8px 16px;
+          border: none;
+          border-radius: 18px;
+          background: transparent;
+          color: rgba(15, 23, 42, 0.4);
+          cursor: pointer;
+          transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+          position: relative;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .bloom-dock-item:active {
+          transform: scale(0.85);
+        }
+        .bloom-dock-item:hover {
+          background: rgba(255, 255, 255, 0.1);
+          color: rgba(15, 23, 42, 0.8);
+        }
+        .bloom-dock-item.active {
+          color: #0891b2;
+        }
+        .bloom-dock-item.active .bloom-dock-icon-wrap {
+          background: linear-gradient(135deg, #06b6d4, #22d3ee);
+          color: white;
+          box-shadow: 0 4px 14px rgba(6, 182, 212, 0.35);
+        }
+        .bloom-dock-icon-wrap {
+          width: 44px;
+          height: 44px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 14px;
+          background: rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.35);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -1px 0 rgba(0, 0, 0, 0.02);
+          transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+          backdrop-filter: blur(20px) saturate(1.5);
+          -webkit-backdrop-filter: blur(20px) saturate(1.5);
+        }
+        .bloom-dock-item:hover .bloom-dock-icon-wrap {
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+          transform: translateY(-2px) scale(1.04);
+        }
+        .bloom-dock-label {
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          line-height: 1;
+          transition: color 0.2s;
+        }
+
         .bloom-conv-item {
           width: 100%; display: flex; align-items: center; gap: 10px;
           padding: 8px 10px; border-radius: 14px; border: none; cursor: pointer; text-align: left;
@@ -3097,9 +3383,9 @@ const [sendRippleTrigger, setSendRippleTrigger] = useState(0);
           --accent: #06b6d4;
           --accent-strong: #0891b2;
           --accent-grad: linear-gradient(135deg, #22d3ee 0%, #38bdf8 48%, #0ea5e9 100%);
-          --text-primary: rgba(15, 23, 42, 0.88);
-          --text-secondary: rgba(51, 65, 85, 0.72);
-          --text-tertiary: rgba(100, 116, 139, 0.62);
+          --text-primary: rgba(10, 15, 30, 0.95);
+          --text-secondary: rgba(30, 41, 59, 0.78);
+          --text-tertiary: rgba(71, 85, 105, 0.65);
           --border-color: rgba(8, 145, 178, 0.16);
           --glass-bg: rgba(255, 255, 255, 0.5);
           --glass-panel: rgba(255, 255, 255, 0.68);
@@ -3429,18 +3715,403 @@ const [sendRippleTrigger, setSendRippleTrigger] = useState(0);
           border-color: rgba(6,182,212,0.2);
         }
 
-        /* RESPONSIVE */
+        /* LIGHT THEME DOCK ENHANCEMENT — Ultra-transparent iOS glass */
+        .bloom-dock {
+          background: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.15) 60%);
+          border-top: 1px solid rgba(255, 255, 255, 0.35);
+          padding: 10px 16px 14px;
+          gap: 6px;
+          backdrop-filter: blur(40px) saturate(1.8);
+          -webkit-backdrop-filter: blur(40px) saturate(1.8);
+        }
+        .bloom-dock-icon-wrap {
+          background: rgba(255, 255, 255, 0.25);
+          border: 1px solid rgba(255, 255, 255, 0.45);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+          backdrop-filter: blur(24px) saturate(1.6);
+          -webkit-backdrop-filter: blur(24px) saturate(1.6);
+        }
+        .bloom-dock-item {
+          color: rgba(8, 51, 68, 0.5);
+        }
+        .bloom-dock-item:hover {
+          color: rgba(8, 51, 68, 0.85);
+          background: rgba(255, 255, 255, 0.12);
+        }
+        .bloom-dock-item.active {
+          color: #0891b2;
+        }
+        .bloom-dock-item.active .bloom-dock-icon-wrap {
+          background: linear-gradient(135deg, rgba(6, 182, 212, 0.85), rgba(34, 211, 238, 0.85));
+          color: white;
+          box-shadow: 0 4px 16px rgba(6, 182, 212, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+          border-color: rgba(255, 255, 255, 0.2);
+        }
+        .bloom-dock-item:hover .bloom-dock-icon-wrap {
+          background: rgba(255, 255, 255, 0.4);
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+          transform: translateY(-2px) scale(1.04);
+          border-color: rgba(255, 255, 255, 0.55);
+        }
+
+        /* RESPONSIVE - Mobile keyboard safe */
+        @supports (height: 100dvh) {
+          .bloom-shell { height: 100dvh; }
+        }
+        @supports not (height: 100dvh) {
+          .bloom-shell { height: 100vh; height: -webkit-fill-available; }
+        }
         @media (max-width: 768px) {
-          .bloom-shell { padding: 0; gap: 0; }
-          .bloom-sidebar { position: absolute; inset: 0; width: 100%; max-width: 100%; z-index: 1; }
+          .bloom-shell { padding: 0; gap: 0; height: 100dvh; height: -webkit-fill-available; }
+          .bloom-sidebar { position: absolute; inset: 0; width: 100%; max-width: 100%; z-index: 1; border-radius: 0; }
           .bloom-sidebar,
           .bloom-main { border-radius: 0; border: none; }
           .bloom-shell.has-chat .bloom-sidebar { display: none; }
           .bloom-shell:not(.has-chat) .bloom-main { display: none; }
           .bloom-back-btn { display: flex !important; }
           .bloom-info-panel { display: none; }
+          .bloom-chat-header { height: 56px; padding: 0 10px; gap: 8px; flex-shrink: 0; }
+          .bloom-header-avatar { width: 36px; height: 36px; }
+          .bloom-header-name { font-size: 14px; max-width: 120px; }
+          .bloom-chat-body { flex: 1; min-height: 0; overflow: hidden; }
+          .bloom-chat-workspace { flex: 1; min-height: 0; }
+          .bloom-messages-area { flex: 1; min-height: 0; padding: 10px 10px 0; }
+          .bloom-msg-stream { max-width: 100%; }
+          .bloom-msg-group { max-width: 85%; }
+          .bloom-msg-group.left { max-width: 85%; }
+          .bloom-msg-avatar-slot, .bloom-msg-avatar, .bloom-msg-avatar-spacer { width: 26px; height: 26px; }
+          .bloom-msg-avatar { border-radius: 8px; }
+          .bloom-bubble { padding: 7px 10px 16px 10px; border-radius: 16px; min-width: 48px; }
+          .bloom-bubble.mine { border-radius: 16px 16px 4px 16px; }
+          .bloom-bubble.theirs { border-radius: 16px 16px 16px 4px; }
+          .bloom-img-attachment { max-width: 200px; max-height: 240px; object-fit: cover; }
+          .bloom-audio-attachment { min-width: 160px; }
+          .bloom-composer { padding: 8px 8px; flex-shrink: 0; }
+          .bloom-composer-form { gap: 4px; }
+          .bloom-composer-side-actions { gap: 2px; }
+          .bloom-composer-btn { width: 32px; height: 32px; border-radius: 10px; }
+          .bloom-input-field { height: 38px; border-radius: 14px; }
+          .bloom-send-btn, .bloom-like-btn { width: 38px; height: 38px; border-radius: 12px; }
+          .bloom-msg-actions { display: none !important; }
+          .bloom-ctx-menu, .bloom-reaction-picker { font-size: 13px; }
+          .bloom-date-divider { padding: 8px 0; }
+          .bloom-date-divider span { font-size: 10px; padding: 2px 10px; }
+          .bloom-conv-item { padding: 8px 8px; gap: 8px; }
+          .bloom-conv-avatar { width: 42px; height: 42px; }
+          .bloom-conv-name { font-size: 13px; max-width: 110px; }
+          .bloom-conv-preview { font-size: 11px; max-width: 120px; }
+          .bloom-conv-skeleton-avatar { width: 42px; height: 42px; }
+          .bloom-search-input { height: 34px; font-size: 13px; }
+          .bloom-filter-tab { font-size: 10px; height: 28px; }
+          .bloom-sidebar-header { padding: 12px 12px 8px; }
+          .bloom-title { font-size: 18px; }
+          .bloom-tools-popover { bottom: calc(100% + 4px); left: 8px; padding: 6px; }
+          .bloom-tools-item { padding: 6px 8px; font-size: 10px; }
+          .bloom-emoji-picker { bottom: calc(100% + 4px); right: 8px; padding: 8px; }
+          .bloom-emoji-btn { width: 32px; height: 32px; font-size: 18px; }
+          .bloom-pending-banner { padding: 10px; }
+          .bloom-reply-preview { padding: 6px 8px; margin-bottom: 6px; }
+          .bloom-recording-banner { padding: 6px 8px; margin-bottom: 6px; }
+          .bloom-glass-icon-btn { width: 30px; height: 30px; border-radius: 8px; }
+          .bloom-dock { padding: 6px 8px 10px; gap: 2px; border-radius: 0; }
+          .bloom-dock-item { padding: 6px 12px; border-radius: 14px; }
+          .bloom-dock-icon-wrap { width: 38px; height: 38px; border-radius: 12px; }
+          .bloom-dock-icon-wrap svg { width: 17px; height: 17px; }
+          .bloom-dock-label { font-size: 9px; }
         }
-          /* ===== CANVAS + ANIMATION ENHANCEMENTS ===== */
+        @media (max-width: 380px) {
+          .bloom-composer-side-actions { gap: 1px; }
+          .bloom-composer-btn { width: 30px; height: 30px; }
+          .bloom-msg-group, .bloom-msg-group.left { max-width: 90%; }
+          .bloom-img-attachment { max-width: 160px; }
+          .bloom-chat-header { padding: 0 8px; }
+          .bloom-header-name { font-size: 13px; max-width: 90px; }
+        }
+        @media (min-width: 769px) and (max-width: 1024px) {
+          .bloom-sidebar { width: 280px; min-width: 240px; }
+          .bloom-info-panel { width: 220px; min-width: 200px; }
+          .bloom-msg-group { max-width: 75%; }
+        }
+
+        /* ===== DARK MODE ===== */
+        .bloom-dark .bloom-shell,
+        .bloom-dark .bloom-bg-fixed {
+          background: linear-gradient(135deg, #0c1220 0%, #0a1628 42%, #0d1117 100%) !important;
+        }
+        .bloom-dark .bloom-bg-fixed::before {
+          background-image:
+            linear-gradient(rgba(34,211,238,0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(34,211,238,0.025) 1px, transparent 1px) !important;
+        }
+        .bloom-dark .bloom-shell {
+          --accent: #22d3ee !important;
+          --accent-strong: #06b6d4 !important;
+          --accent-grad: linear-gradient(135deg, #06b6d4, #22d3ee) !important;
+          --text-primary: rgba(241, 245, 249, 0.95) !important;
+          --text-secondary: rgba(203, 213, 225, 0.82) !important;
+          --text-tertiary: rgba(148, 163, 184, 0.72) !important;
+          --border-color: rgba(148, 163, 184, 0.12) !important;
+          --glass-bg: rgba(15, 23, 42, 0.55) !important;
+          --glass-panel: rgba(15, 23, 42, 0.68) !important;
+          --glass-hover: rgba(30, 41, 59, 0.75) !important;
+          --glass-active: rgba(6, 182, 212, 0.18) !important;
+          --shadow-soft: 0 24px 70px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.2) !important;
+          background: linear-gradient(135deg, #0c1220 0%, #0a1628 42%, #0d1117 100%) !important;
+        }
+        .bloom-dark .bloom-sidebar {
+          background: linear-gradient(180deg, rgba(15,23,42,0.7), rgba(15,23,42,0.45)), rgba(8,25,40,0.5) !important;
+          border-right: 1px solid rgba(148,163,184,0.1) !important;
+          box-shadow: 0 0 40px rgba(0,0,0,0.3) !important;
+        }
+        .bloom-dark .bloom-sidebar::after,
+        .bloom-dark .bloom-main::after {
+          box-shadow: inset 0 0 0 1px rgba(34,211,238,0.06) !important;
+        }
+        .bloom-dark .bloom-sidebar-header {
+          background: linear-gradient(180deg, rgba(15,23,42,0.5), rgba(15,23,42,0.2)) !important;
+          border-bottom-color: rgba(148,163,184,0.1) !important;
+        }
+        .bloom-dark .bloom-eyebrow { color: #22d3ee !important; }
+        .bloom-dark .bloom-title { color: var(--text-primary) !important; }
+        .bloom-dark .bloom-unread-badge {
+          background: rgba(6, 182, 212, 0.12) !important;
+          border-color: rgba(6, 182, 212, 0.2) !important;
+          color: var(--text-primary) !important;
+          box-shadow: 0 10px 28px rgba(6,182,212,0.08) !important;
+        }
+        .bloom-dark .bloom-search-input,
+        .bloom-dark .bloom-input-field,
+        .bloom-dark .bloom-group-name-input {
+          background: rgba(30, 41, 59, 0.7) !important;
+          border-color: rgba(148,163,184,0.15) !important;
+          color: var(--text-primary) !important;
+        }
+        .bloom-dark .bloom-search-input:focus,
+        .bloom-dark .bloom-input-field:focus-within,
+        .bloom-dark .bloom-group-name-input:focus {
+          background: rgba(30, 41, 59, 0.9) !important;
+          border-color: rgba(6, 182, 212, 0.4) !important;
+          box-shadow: 0 0 0 3px rgba(34,211,238,0.1) !important;
+        }
+        .bloom-dark .bloom-filter-tab {
+          color: var(--text-secondary) !important;
+          background: transparent !important;
+          border: 1px solid transparent !important;
+        }
+        .bloom-dark .bloom-filter-tab:hover {
+          background: rgba(30,41,59,0.6) !important;
+          color: var(--text-primary) !important;
+        }
+        .bloom-dark .bloom-filter-tab.active {
+          color: #22d3ee !important;
+          background: rgba(6,182,212,0.15) !important;
+          border-color: rgba(6,182,212,0.25) !important;
+        }
+        .bloom-dark .bloom-conv-item {
+          border-color: transparent !important;
+        }
+        .bloom-dark .bloom-conv-item:hover {
+          background: rgba(30,41,59,0.5) !important;
+          border-color: rgba(148,163,184,0.1) !important;
+        }
+        .bloom-dark .bloom-conv-item.active {
+          background: rgba(6,182,212,0.12) !important;
+          border-color: rgba(6,182,212,0.25) !important;
+        }
+        .bloom-dark .bloom-conv-name,
+        .bloom-dark .bloom-conv-preview,
+        .bloom-dark .bloom-conv-time {
+          color: var(--text-primary) !important;
+        }
+        .bloom-dark .bloom-main {
+          background: linear-gradient(180deg, rgba(15,23,42,0.5), rgba(15,23,42,0.25)), rgba(8,25,40,0.4) !important;
+          border: 1px solid rgba(148,163,184,0.1) !important;
+          box-shadow: 0 0 40px rgba(0,0,0,0.3) !important;
+        }
+        .bloom-dark .bloom-chat-header {
+          background: rgba(15,23,42,0.6) !important;
+          border-bottom-color: rgba(148,163,184,0.1) !important;
+        }
+        .bloom-dark .bloom-header-name { color: var(--text-primary) !important; }
+        .bloom-dark .bloom-header-status { color: var(--text-secondary) !important; }
+        .bloom-dark .bloom-chat-workspace {
+          background: linear-gradient(180deg, rgba(8,25,40,0.3), rgba(15,23,42,0.1)) !important;
+        }
+        .bloom-dark .bloom-bubble.mine {
+          background: linear-gradient(135deg, rgba(6,182,212,0.85), rgba(34,211,238,0.82)) !important;
+          border-color: rgba(34,211,238,0.3) !important;
+          box-shadow: 0 12px 30px rgba(6,182,212,0.15) !important;
+        }
+        .bloom-dark .bloom-bubble.mine .bloom-msg-text { color: #fff !important; }
+        .bloom-dark .bloom-bubble.mine .bloom-msg-time { color: rgba(255,255,255,0.7) !important; }
+        .bloom-dark .bloom-bubble.theirs {
+          background: rgba(30, 41, 59, 0.75) !important;
+          border-color: rgba(148,163,184,0.15) !important;
+          box-shadow: 0 10px 28px rgba(0,0,0,0.15) !important;
+        }
+        .bloom-dark .bloom-bubble.theirs .bloom-msg-text { color: var(--text-primary) !important; }
+        .bloom-dark .bloom-bubble.theirs .bloom-msg-time { color: var(--text-secondary) !important; }
+        .bloom-dark .bloom-date-divider span,
+        .bloom-dark .bloom-typing-bubble {
+          background: rgba(30,41,59,0.7) !important;
+          border-color: rgba(148,163,184,0.15) !important;
+          color: var(--text-secondary) !important;
+        }
+        .bloom-dark .bloom-sender-name { color: var(--accent) !important; }
+        .bloom-dark .bloom-reply-quote {
+          background: rgba(30,41,59,0.6) !important;
+          border-left-color: var(--accent) !important;
+          border-color: rgba(148,163,184,0.12) !important;
+        }
+        .bloom-dark .bloom-reply-author { color: var(--accent) !important; }
+        .bloom-dark .bloom-file-attachment {
+          background: rgba(30,41,59,0.6) !important;
+          border-color: rgba(148,163,184,0.15) !important;
+          color: var(--text-primary) !important;
+        }
+        .bloom-dark .bloom-composer {
+          background: rgba(15,23,42,0.6) !important;
+          border-top-color: rgba(148,163,184,0.1) !important;
+        }
+        .bloom-dark .bloom-text-input { color: var(--text-primary) !important; }
+        .bloom-dark .bloom-text-input::placeholder { color: var(--text-tertiary) !important; }
+        .bloom-dark .bloom-glass-icon-btn,
+        .bloom-dark .bloom-composer-btn,
+        .bloom-dark .bloom-back-btn,
+        .bloom-dark .bloom-like-btn {
+          background: rgba(30,41,59,0.6) !important;
+          border-color: rgba(148,163,184,0.15) !important;
+          color: var(--text-secondary) !important;
+        }
+        .bloom-dark .bloom-glass-icon-btn:hover,
+        .bloom-dark .bloom-composer-btn:hover,
+        .bloom-dark .bloom-back-btn:hover,
+        .bloom-dark .bloom-like-btn:hover {
+          background: rgba(30,41,59,0.9) !important;
+          color: #22d3ee !important;
+        }
+        .bloom-dark .bloom-glass-icon-btn.accent {
+          background: var(--accent-grad) !important;
+          color: white !important;
+        }
+        .bloom-dark .bloom-glass-icon-btn.active {
+          background: rgba(6,182,212,0.2) !important;
+          color: #22d3ee !important;
+          border-color: rgba(6,182,212,0.3) !important;
+        }
+        .bloom-dark .bloom-msg-actions,
+        .bloom-dark .bloom-ctx-menu,
+        .bloom-dark .bloom-reaction-picker,
+        .bloom-dark .bloom-tools-popover,
+        .bloom-dark .bloom-emoji-picker {
+          background: rgba(15,23,42,0.9) !important;
+          border-color: rgba(148,163,184,0.15) !important;
+          box-shadow: 0 18px 44px rgba(0,0,0,0.4) !important;
+        }
+        .bloom-dark .bloom-action-btn:hover,
+        .bloom-dark .bloom-ctx-menu button:hover,
+        .bloom-dark .bloom-tools-item:hover,
+        .bloom-dark .bloom-emoji-btn:hover {
+          background: rgba(6,182,212,0.15) !important;
+          color: #22d3ee !important;
+        }
+        .bloom-dark .bloom-action-btn,
+        .bloom-dark .bloom-ctx-menu button,
+        .bloom-dark .bloom-tools-item {
+          color: var(--text-secondary) !important;
+        }
+        .bloom-dark .bloom-reaction-summary {
+          background: rgba(30,41,59,0.7) !important;
+          border-color: rgba(148,163,184,0.15) !important;
+        }
+        .bloom-dark .bloom-info-panel {
+          background: rgba(15,23,42,0.55) !important;
+          border-left-color: rgba(148,163,184,0.1) !important;
+        }
+        .bloom-dark .bloom-info-header { border-bottom-color: rgba(148,163,184,0.1) !important; }
+        .bloom-dark .bloom-info-action {
+          background: rgba(30,41,59,0.5) !important;
+          border-color: rgba(148,163,184,0.15) !important;
+          color: var(--text-secondary) !important;
+        }
+        .bloom-dark .bloom-info-action:hover { background: rgba(6,182,212,0.15) !important; color: #22d3ee !important; }
+        .bloom-dark .bloom-info-profile { background: rgba(30,41,59,0.5) !important; border-color: rgba(148,163,184,0.12) !important; }
+        .bloom-dark .bloom-welcome { background: linear-gradient(180deg, rgba(15,23,42,0.2), rgba(6,182,212,0.08)) !important; }
+        .bloom-dark .bloom-welcome h2, .bloom-dark .bloom-welcome p { color: var(--text-primary) !important; }
+        .bloom-dark .bloom-welcome-icon { background: rgba(6,182,212,0.15) !important; border-color: rgba(6,182,212,0.2) !important; color: #22d3ee !important; }
+        .bloom-dark .bloom-pending-card { background: rgba(30,41,59,0.6) !important; border-color: rgba(148,163,184,0.15) !important; }
+        .bloom-dark .bloom-pending-info { background: rgba(30,41,59,0.4) !important; }
+        .bloom-dark .bloom-pending-banner { background: rgba(30,41,59,0.7) !important; border-color: rgba(148,163,184,0.15) !important; }
+        .bloom-dark .bloom-reply-preview { background: rgba(30,41,59,0.6) !important; border-color: rgba(6,182,212,0.2) !important; }
+        .bloom-dark .bloom-recording-banner { background: rgba(239,68,68,0.12) !important; border-color: rgba(239,68,68,0.2) !important; }
+        .bloom-dark .bloom-group-modal { background: rgba(15,23,42,0.95) !important; border-color: rgba(148,163,184,0.15) !important; }
+        .bloom-dark .bloom-group-modal-header { background: rgba(15,23,42,0.8) !important; border-bottom-color: rgba(148,163,184,0.1) !important; }
+        .bloom-dark .bloom-group-member-item { color: var(--text-primary) !important; }
+        .bloom-dark .bloom-group-member-item:hover { background: rgba(30,41,59,0.5) !important; }
+        .bloom-dark .bloom-group-member-item.checked { background: rgba(6,182,212,0.12) !important; border-color: rgba(6,182,212,0.2) !important; }
+        .bloom-dark .bloom-call-overlay, .bloom-dark .bloom-modal-backdrop { background: rgba(0,0,0,0.6) !important; }
+        .bloom-dark .bloom-call-window { background: rgba(15,23,42,0.95) !important; border-color: rgba(148,163,184,0.15) !important; }
+        .bloom-dark .bloom-call-bg { background: linear-gradient(135deg, rgba(6,182,212,0.12), rgba(15,23,42,0.4)) !important; }
+        .bloom-dark .bloom-call-ctrl { background: rgba(30,41,59,0.7) !important; border-color: rgba(148,163,184,0.15) !important; color: var(--text-primary) !important; }
+        .bloom-dark .bloom-call-ctrl.active { background: var(--accent-grad) !important; color: white !important; }
+        .bloom-dark .bloom-video-status { background: rgba(15,23,42,0.85) !important; border-color: rgba(148,163,184,0.15) !important; color: var(--text-primary) !important; }
+        .bloom-dark .bloom-online-dot { color: #34d399 !important; }
+        .bloom-dark .bloom-online-section-label, .bloom-dark .bloom-section-label { color: var(--text-secondary) !important; }
+        .bloom-dark .bloom-online-item:hover { background: rgba(30,41,59,0.4) !important; }
+        .bloom-dark .bloom-load-more-btn { background: rgba(30,41,59,0.6) !important; border-color: rgba(148,163,184,0.15) !important; color: var(--text-primary) !important; }
+        .bloom-dark .bloom-audio-attachment { background: rgba(30,41,59,0.6) !important; border-color: rgba(148,163,184,0.15) !important; }
+        .bloom-dark .bloom-audio-attachment audio { filter: invert(1) hue-rotate(180deg); }
+        .bloom-dark .bloom-img-attachment { border-color: rgba(148,163,184,0.15) !important; }
+        .bloom-dark .bloom-send-btn, .bloom-dark .bloom-like-btn { background: var(--accent-grad) !important; color: white !important; }
+        .bloom-dark .bloom-create-group-btn { background: var(--accent-grad) !important; }
+        .bloom-dark .bloom-emoji-toggle.active { color: #22d3ee !important; }
+        .bloom-dark .bloom-typing-dot, .bloom-dark .bloom-audio-wave span { background: var(--accent) !important; }
+        .bloom-dark .bloom-msg-row.highlighted .bloom-bubble { box-shadow: 0 0 0 3px rgba(34,211,238,0.3) !important; }
+        /* Dark mode scrollbars */
+        .bloom-dark * { scrollbar-color: rgba(34,211,238,0.2) transparent !important; }
+        .bloom-dark *::-webkit-scrollbar-thumb { background: rgba(34,211,238,0.2) !important; }
+        .bloom-dark *::-webkit-scrollbar-thumb:hover { background: rgba(34,211,238,0.35) !important; }
+
+        /* DARK MODE DOCK — Ultra-transparent iOS glass */
+        .bloom-dark .bloom-dock {
+          background: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.04) 60%);
+          border-top-color: rgba(255, 255, 255, 0.08);
+          backdrop-filter: blur(40px) saturate(1.8);
+          -webkit-backdrop-filter: blur(40px) saturate(1.8);
+        }
+        .bloom-dark .bloom-dock-icon-wrap {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.12);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+          backdrop-filter: blur(24px) saturate(1.6);
+          -webkit-backdrop-filter: blur(24px) saturate(1.6);
+          color: rgba(148, 163, 184, 0.7);
+        }
+        .bloom-dark .bloom-dock-item {
+          color: rgba(148, 163, 184, 0.45);
+        }
+        .bloom-dark .bloom-dock-item:hover {
+          color: rgba(226, 232, 240, 0.9);
+          background: rgba(255, 255, 255, 0.05);
+        }
+        .bloom-dark .bloom-dock-item:hover .bloom-dock-icon-wrap {
+          background: rgba(255, 255, 255, 0.14);
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+          transform: translateY(-2px) scale(1.04);
+          color: #22d3ee;
+          border-color: rgba(255, 255, 255, 0.18);
+        }
+        .bloom-dark .bloom-dock-item.active {
+          color: #22d3ee;
+        }
+        .bloom-dark .bloom-dock-item.active .bloom-dock-icon-wrap {
+          background: linear-gradient(135deg, rgba(6, 182, 212, 0.75), rgba(34, 211, 238, 0.75));
+          color: white;
+          box-shadow: 0 4px 16px rgba(6, 182, 212, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+          border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        /* ===== CANVAS + ANIMATION ENHANCEMENTS ===== */
 @keyframes msgSlideIn {
   0% { opacity: 0; transform: translateY(12px) scale(0.96); filter: blur(4px); }
   60% { filter: blur(0); }
